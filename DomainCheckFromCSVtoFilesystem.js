@@ -6,63 +6,49 @@ const fs = require('fs');
 const { Resolver } = require('dns').promises;
 const resolver = new Resolver();
 resolver.setServers([
+    '8.8.8.8',
     '208.67.222.222',
-    '208.67.220.220',
     '1.1.1.1',
-    '1.0.0.1',
     '80.80.80.80',
-    '80.80.81.81',
     '64.6.64.6',
+    '8.8.4.4',
+    '208.67.220.220',
+    '1.0.0.1',
+    '80.80.81.81',
     '64.6.65.6',
     '9.9.9.9',
-    '149.112.112.112',
-    '8.8.8.8',
-    '8.8.4.4',
+    '149.112.112.112'
+    
 ]);
 //resolver.setServers(['4.4.4.4']);
 /* end dependencies for CSV crawling, and dns*/
-
-var filePath = './findlaw.com-brokenlinks-subdomains-live-21-Apr-2020_16-57-01-107e8d0e3a1543ca43238ac3ae38c725.csv'
-var processArray = []
-var returnArray = []
-
-
-async function csvToObj(filePath) {
-    const readFile = async () => {
-        console.log('Start')
-        fs.readFile(filePath, async (err, data) => {
-            if (err) {
-                console.error(err)
-                return
-            }
-            const res = await neatCsv(data);
-            parseCSVObj(res) //Call next function
-        })
-        console.log('End')
+var fileDirectory = '/inputFiles/'
+var outputDirectory = '/outputFiles/'
+var fileList = []
+//the flow
+async function flowLoop(listofFiles) {
+    console.log('flowLoop')
+    for (const file of listofFiles) {
+        console.log('get CSV Buffer From File')
+        var csvBuffer = await csvReadAsync(`${__dirname}${fileDirectory}${file}`)
+        console.log('get CSV Object From Buffer')
+        var csvObj = await neatCsv(csvBuffer);     
+        console.log('parse CSV Object From Buffer')
+        var processedData = await parseandDedupeCSVObj(csvObj) //writes processArray global Var
+        console.log('Checking Domain List, may take a moment ... ')
+        var available = await checkDomainAvailability(processedData)
+        console.log('write CSV')
+        writeCSV(available) //all domains
+        console.log('write Terms CSV')
+        writeCSVTerms(available) //search for terms
     }
-    await readFile()
+   // const promisResolves = await Promise.all(promises)
+    console.log('all promises complete')
 }
-async function parseCSVObj(csvObj) {
-    console.log('CSV Obj Preview - ' + JSON.stringify(csvObj[1]).substring(0, 150))
-    console.log('Lines in CSV - ' + csvObj.length)
-    var csvObjLen = csvObj.length
-
-    while (csvObjLen--) {
-        var url = csvObj[csvObjLen]['Link URL'] // Your needed field Title from CSV 
-        /*process your csv data here*/
-        var domain = await getBaseUrl(url) //get base URl's      
-        if (processArray.indexOf(domain) == -1) { //dedupe list
-            processArray.push(domain)
-        }
-    }
-    console.log('end of parseCSV')
-    console.log('items after proccessing - ' + processArray.length)
-    //process your process array
-    checkDomainAvailability(processArray)
-}
+//the main business
 async function checkDomainAvailability(domainArray) {
+    var returnArray = []
     var retryList = []
-    console.log('Checking Domain List, may take a moment ... ')
     async function DNSCheck(name) {
         try {
             var returnguy = await resolver.resolve4(name)
@@ -73,9 +59,11 @@ async function checkDomainAvailability(domainArray) {
             if (error.indexOf('ENOTFOUND') > -1) {
                 //console.log(name + '  NotFound Error ' + error)
                 if (retryList.indexOf(name) > -1) {
-                    console.log('first retry helped')
+                    console.log(' retry helped ')
                 }
-                returnArray.push(name)
+                if (returnArray.indexOf(name) == -1) {//dedupe return as well
+                    returnArray.push(name) 
+                }
             }
             else {
                 if (retryList.indexOf(name) == -1) {
@@ -86,7 +74,6 @@ async function checkDomainAvailability(domainArray) {
         }
     }
     async function asyncRequestLoop(domainArray) {
-        const mapLoop = async _ => {
             const promises = domainArray.map(async item => {
                 const checked = await DNSCheck(item)
                 return checked
@@ -94,35 +81,73 @@ async function checkDomainAvailability(domainArray) {
             const domainslist = await Promise.all(promises)
             console.log('domains proccessed - ' + domainslist.length)
             console.log('available domains - ' + returnArray.length)
-            writeCSV() //all domains
-            writeCSVTerms() //search for terms
+            return(returnArray)
         }
-        mapLoop()
-    }
     await asyncRequestLoop(domainArray)
+    return returnArray
+
 }
-async function writeCSV() {
+//csv and fs functions
+function enumerateDirectory(directory) {
+
+    fs.readdirSync(`${ __dirname }${directory}`).forEach(file => {
+        fileList.push(file)
+    });
+
+}
+async function csvReadAsync(filePath) {
+
+        return new Promise((resolve, reject) => {
+            fs.readFile(filePath, function (err, data) {
+                if (err) {
+                    reject(err);
+                }
+                resolve(data);
+            });
+        });
+    
+ 
+}
+async function parseandDedupeCSVObj(csvObj) {
+    var processArray = []
+    //console.log('CSV Obj Preview - ' + JSON.stringify(csvObj[1]).substring(0, 150))
+    console.log('Parse and Dedupe begin Lines in CSV - ' + csvObj.length)
+    var csvObjLen = csvObj.length
+
+    while (csvObjLen--) {
+        var url = csvObj[csvObjLen]['Link URL'] // Your needed field Title from CSV 
+        /*process your csv data here*/
+        var domain = await getBaseUrl(url) //get base URl's      
+        if (processArray.indexOf(domain) == -1) { //dedupe list
+            processArray.push(domain)
+        }
+    }
+    console.log('Parse and Dedupe end items after proccessing - ' + processArray.length)
+    return processArray
+
+}
+async function writeCSV(available) {
     console.log("writeCSV")
-    ws = fs.createWriteStream(`${__dirname}/output.csv`)
-    var len = returnArray.length;
+    ws = fs.createWriteStream(`${__dirname}${outputDirectory}all-available-domains.csv`, { flags: 'a' })
+    var len = available.length;
     while (len--) {
-        ws.write(`${JSON.stringify(returnArray[len])}\n`)
+        ws.write(`${JSON.stringify(available[len])}\n`)
         //console.log('site ' + returnArray[len])
     }
 
     ws.end()
 
 }
-function writeCSVTerms() {
+function writeCSVTerms(available) {
     console.log("writeCSVTerms")
-    ws = fs.createWriteStream(`${__dirname}/outputTerms.csv`)
-    let len = returnArray.length;
+    ws = fs.createWriteStream(`${__dirname}${outputDirectory}terms-available-domains.csv`, { flags: 'a' })
+    let len = available.length;
     while (len--) {
-        let terms = ['bank', 'walker', 'debt', 'chapter',]
+        let terms = ['dothan','alabama','money','finance']
         let termsLen = terms.length
         while (termsLen--) {
-            if (returnArray[len].indexOf(terms[termsLen]) > -1) {
-                ws.write(`${JSON.stringify(returnArray[len])}\n`)
+            if (available[len].indexOf(terms[termsLen]) > -1) {
+                ws.write(`${JSON.stringify(available[len])}\n`)
                 //console.log('site ' + returnArray[len])
             }
 
@@ -133,20 +158,26 @@ function writeCSVTerms() {
 }
 /*helper functions*/
 async function getBaseUrl(url) {
-    var domain = url.replace('http://', '').replace('https://', '').replace('www.', '')
+    var domain = url.replace('http://', '').replace('https://', '').replace('www.', '').replace('.htm', '').replace('.html', '').replace('.php', '').replace('.cfm', '').replace('.js', '').replace('.shtml', '').replace('.aspx', '').replace('.asp', '')
+
     var domain = domain.split("?").shift();
     var domain = domain.split("#").shift();
-    while (domain.split('/').length > 2) {
-        domain = domain.split("/").shift();
+
+    while (domain.split('/').length > 1) {
+        domain = domain.split("/").shift(); //always want the first
     }
-    while (domain.split('.').length > 3) {
-        domain = domain.split(".").shift();
+    while (domain.split('.').length > 2) {
+        domain = domain.split(".");// want two parts not just the first
+        domain.shift()
+        domain = domain.join('.');
     }
+
     return (domain)
 }
-
-
-csvToObj(filePath)
+console.log('get filenames')
+enumerateDirectory(fileDirectory) //writes fileList global Var
+console.log('begin large flow')
+flowLoop(fileList) //writes fileList global Var
 /* old stuff that was usefull in creating this app.
 // Parse the csv content
 const records = csv.parse(content)
