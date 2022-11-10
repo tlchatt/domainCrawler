@@ -27,6 +27,7 @@ var outputDirectory = '/outputFiles/'
 var fileList = []
 //the flow
 async function flowLoop(listofFiles) {
+    let processArray = []
     console.log('flowLoop')
     for (const file of listofFiles) {
         console.log('get CSV Buffer From File')
@@ -37,11 +38,13 @@ async function flowLoop(listofFiles) {
         var processedData = await parseandDedupeCSVObj(csvObj) //writes processArray global Var
         console.log('Checking Domain List, may take a moment ... ')
         var available = await checkDomainAvailability(processedData)
+        var dedupedavailable = await dedupe(available, processArray)
         console.log('write CSV')
-        writeCSV(available) //all domains
         console.log('write Terms CSV')
-        writeCSVTerms(available) //search for terms
+       
     }
+    writeCSV(dedupedavailable) //all domains
+    writeCSVTerms(dedupedavailable) //search for terms
    // const promisResolves = await Promise.all(promises)
     console.log('all promises complete')
 }
@@ -126,6 +129,23 @@ async function parseandDedupeCSVObj(csvObj) {
     return processArray
 
 }
+async function dedupe(list, processArray){
+
+   
+    //console.log('CSV Obj Preview - ' + JSON.stringify(csvObj[1]).substring(0, 150))
+    console.log('Dedupe final list - ' + list.length)
+    var listLen = list.length
+
+    while (listLen--) {
+        var url = list[listLen] // Your needed field Title from CSV
+        /*process your csv data here*/
+              
+        if (processArray.indexOf(url) == -1) { //dedupe list
+            processArray.push(url)
+        }
+    }
+    return processArray
+}
 async function writeCSV(available) {
     console.log("writeCSV")
     ws = fs.createWriteStream(`${__dirname}${outputDirectory}all-available-domains.csv`, { flags: 'a' })
@@ -143,7 +163,7 @@ function writeCSVTerms(available) {
     ws = fs.createWriteStream(`${__dirname}${outputDirectory}terms-available-domains.csv`, { flags: 'a' })
     let len = available.length;
     while (len--) {
-        let terms = ['dothan','alabama','money','finance']
+        let terms = ['disability', 'nc-', 'carolina', 'charlotte', 'ssdi', 'ssi', 'ssa', 'benefit', 'help', 'assistance','social','security','north','help','people','disabled','advocate','-nc','your','aid','east','south','you']
         let termsLen = terms.length
         while (termsLen--) {
             if (available[len].indexOf(terms[termsLen]) > -1) {
